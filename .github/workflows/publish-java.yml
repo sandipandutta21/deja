@@ -1,0 +1,77 @@
+name: Publish Java to Maven Central
+
+# Fires on a tag like java-v0.1.0. The version is never taken from the tag alone -- it's
+# cross-checked against java/build.gradle.kts below, so a forgotten version bump fails loudly
+# instead of silently publishing a mismatched artifact.
+on:
+  push:
+    tags:
+      - "java-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # deja-core's test suite includes real integration tests against the official MCP
+      # reference servers (server-everything, server-filesystem), spawned as real Node
+      # subprocesses from ts/node_modules -- not mocked. Publishing skips nothing: the exact
+      # same `./gradlew build` that must pass locally must pass here too.
+      - name: Install MCP reference servers (ts/)
+        working-directory: ts
+        run: npm ci
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#java-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches the project's configured version
+        working-directory: java
+        run: |
+          PROJECT_VERSION=$(./gradlew -q :deja-core:properties | awk -F': ' '/^version:/ {print $2}')
+          if [ "$PROJECT_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} (version ${{ steps.version.outputs.version }}) does not match the version configured in java/build.gradle.kts ($PROJECT_VERSION). Bump build.gradle.kts and re-tag."
+            exit 1
+          fi
+
+      - name: Build and test
+        working-directory: java
+        run: ./gradlew build
+
+      # Credentials are never stored in this repo. mavenCentralUsername/Password is a Central
+      # Portal *user token* (not your login), generated at central.sonatype.com/account.
+      # signingInMemoryKey is the ASCII-armored GPG private key
+      # (`gpg --export-secret-keys --armor <key-id>`), not the local keyring itself -- CI has
+      # no keyring to unlock. All five are GitHub repo secrets (Settings > Secrets and
+      # variables > Actions), read here via Gradle's ORG_GRADLE_PROJECT_ env var convention.
+      - name: Publish and release to Maven Central
+        working-directory: java
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.GPG_SIGNING_KEY_ID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_SIGNING_KEY_PASSWORD }}
+        # --no-configuration-cache: the publish plugin's credential/signing providers are read
+        # at task-execution time from env vars set for this one job run -- not worth the risk
+        # of a stale cached configuration papering over a rotated secret.
+        run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache

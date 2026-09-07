@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+
+# Gradle (java/) -- local per-project cache/metadata; the wrapper jar itself is NOT ignored
+.gradle/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Coverage
+coverage/
+
+# Test-run scratch directories (created by test/*.test.ts, cleaned up by afterAll -- this
+# guards against an interrupted run leaving one behind)
+.tmp-*/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local installers -- never meant to be committed
+*.exe
+
+# Tool caches
+.eslintcache
+.cache/
+.claude

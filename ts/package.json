@@ -1,0 +1,53 @@
+{
+  "name": "deja-mcp",
+  "version": "0.1.0",
+  "description": "Record and replay for the Model Context Protocol (MCP)",
+  "type": "module",
+  "bin": {
+    "deja": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./vitest": {
+      "types": "./dist/integration/vitest.d.ts",
+      "import": "./dist/integration/vitest.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": ">=0.6.0",
+    "vitest": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "@modelcontextprotocol/server-everything": "^2026.8.31",
+    "@modelcontextprotocol/server-filesystem": "^2026.8.31",
+    "@types/node": "^20.17.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT"
+}
