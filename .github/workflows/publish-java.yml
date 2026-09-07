@@ -18,11 +18,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 21, not 17: this is the JDK that launches the Gradle daemon itself, which is a separate
+      # concern from what Java version the published artifacts target. buildSrc's own classpath
+      # (the vanniktech publish plugin) requires a JVM runtime of at least 21 to resolve at all;
+      # the actual deja-core/deja-junit5 modules still compile against a JDK 17 *toolchain*
+      # (java.toolchain.languageVersion in the convention plugin, auto-provisioned via
+      # foojay-resolver-convention), independent of whichever JDK is running Gradle itself.
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
