@@ -46,9 +46,13 @@ jobs:
 
       - name: Verify tag matches the project's configured version
         working-directory: java
+        # Reads the version straight out of build.gradle.kts with grep/sed rather than booting
+        # a Gradle daemon for it -- cheaper, and this guard should be able to fail before ever
+        # trusting the wrapper to run at all.
         run: |
-          PROJECT_VERSION=$(./gradlew -q :deja-core:properties | awk -F': ' '/^version:/ {print $2}')
-          if [ "$PROJECT_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+          PROJECT_VERSION=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' build.gradle.kts | head -1)
+          echo "Tag version: ${{ steps.version.outputs.version }} / build.gradle.kts version: $PROJECT_VERSION"
+          if [ -z "$PROJECT_VERSION" ] || [ "$PROJECT_VERSION" != "${{ steps.version.outputs.version }}" ]; then
             echo "::error::Tag ${GITHUB_REF_NAME} (version ${{ steps.version.outputs.version }}) does not match the version configured in java/build.gradle.kts ($PROJECT_VERSION). Bump build.gradle.kts and re-tag."
             exit 1
           fi
