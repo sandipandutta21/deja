@@ -46,6 +46,24 @@ public class Match {
 
     private final Pattern TOKEN_PATTERN = Pattern.compile("[a-z0-9_]+");
 
+    /** A numeric leaf pair is a hard mismatch -- forced REJECT ahead of the fuzzy scoring
+     *  below, however high its overall similarity would otherwise land -- when the two values
+     *  differ by more than half of their magnitude ({@link #numericCloseness} below this). A
+     *  10x change in a transfer amount or a 100x change in an order quantity must never be
+     *  blended away by an otherwise identical payload; a paging {@code limit} off by one, or a
+     *  retry count nudged up slightly, stays in the fuzzy-scored band, since a generic
+     *  structural matcher has no field-level semantics to tell "amount" from "limit" -- only
+     *  how far apart two numbers are. Found via benchmarking (see {@code ../../benchmarks} on
+     *  the TypeScript side): computing token/trigram similarity over the *whole* stringified
+     *  params object let an unrelated field matching exactly (the tool name, a shared key)
+     *  "buy back" enough score to still clear the match threshold. */
+    private final double NUMERIC_HARD_GATE_MIN_CLOSENESS = 0.5;
+
+    /** Joins collected leaf strings with a control character essentially never present in
+     *  real prose, so token/trigram comparison can't accidentally merge the tail of one leaf
+     *  with the head of the next into a token that never existed in either original value. */
+    private final String LEAF_JOIN_SEPARATOR = "␟";
+
     /** Fast-fails matching across different tools: a recorded {@code fetch} call must never
      *  satisfy an incoming {@code write_file} call just because both are {@code tools/call}. */
     private boolean toolNamesCompatible(JsonRpcMessage incoming, JsonRpcMessage recorded) {
@@ -243,13 +261,14 @@ public class Match {
     }
 
     /**
-     * Recursively walks two values in parallel looking for a pair of corresponding leaf
-     * strings that are both path/URI-shaped and unequal. A hard gate ahead of the fuzzy
-     * scoring below: fuzzy-matching an identifier would risk confidently returning one
-     * resource's content (or performing one resource's mutation) for a request naming a
-     * different one.
+     * Recursively walks two values in parallel looking for a leaf pair that must force a hard
+     * REJECT ahead of the fuzzy scoring below, however high its overall similarity would
+     * otherwise land: two unequal path/URI-shaped strings (fuzzy-matching an identifier would
+     * risk confidently returning one resource's content, or performing one resource's
+     * mutation, for a request naming a different one), or two numbers far enough apart to be
+     * a different real-world quantity (see {@link #NUMERIC_HARD_GATE_MIN_CLOSENESS}).
      */
-    private boolean hasMismatchedPathOrUriLeaf(Object a, Object b, int depth) {
+    private boolean hasHardMismatch(Object a, Object b, int depth) {
         if (depth > MAX_RECURSION_DEPTH) {
             return false;
         }
@@ -258,10 +277,14 @@ public class Match {
             return !sa.equals(sb) && (looksLikePathOrUri(sa) || looksLikePathOrUri(sb));
         }
 
+        if (a instanceof Number na && b instanceof Number nb) {
+            return numericCloseness(na.doubleValue(), nb.doubleValue()) < NUMERIC_HARD_GATE_MIN_CLOSENESS;
+        }
+
         if (a instanceof List<?> la && b instanceof List<?> lb) {
             int maxLength = Math.max(la.size(), lb.size());
             for (int i = 0; i < maxLength; i++) {
-                if (hasMismatchedPathOrUriLeaf(i < la.size() ? la.get(i) : null, i < lb.size() ? lb.get(i) : null, depth + 1)) {
+                if (hasHardMismatch(i < la.size() ? la.get(i) : null, i < lb.size() ? lb.get(i) : null, depth + 1)) {
                     return true;
                 }
             }
@@ -273,7 +296,7 @@ public class Match {
             keys.addAll(ma.keySet());
             keys.addAll(mb.keySet());
             for (Object key : keys) {
-                if (hasMismatchedPathOrUriLeaf(ma.get(key), mb.get(key), depth + 1)) {
+                if (hasHardMismatch(ma.get(key), mb.get(key), depth + 1)) {
                     return true;
                 }
             }
@@ -281,6 +304,49 @@ public class Match {
         }
 
         return false;
+    }
+
+    /** Collects every pair of corresponding leaf strings from two parallel-shaped values --
+     *  positionally, by the same array index or object key -- e.g. every prose/free-text
+     *  argument in a request's params, appending each side's leaf to the two builders in
+     *  lockstep. Numbers, booleans, and overall shape are already scored by {@link
+     *  #structuralSimilarity}; folding them into a whole-object stringify for the
+     *  token/trigram channel too (the original implementation) let an exactly-matching
+     *  sibling field (a shared key name, the tool name itself) "buy back" enough score to
+     *  paper over a sibling argument that actually changed. Restricting that channel to just
+     *  the string leaves closes that gap without touching structuralSimilarity's own (already
+     *  correct) per-leaf handling of every other type. */
+    private void collectStringLeafPairs(Object a, Object b, int depth, StringBuilder incomingLeaves, StringBuilder recordedLeaves) {
+        if (depth > MAX_RECURSION_DEPTH) {
+            return;
+        }
+
+        if (a instanceof String sa && b instanceof String sb) {
+            if (incomingLeaves.length() > 0) {
+                incomingLeaves.append(LEAF_JOIN_SEPARATOR);
+                recordedLeaves.append(LEAF_JOIN_SEPARATOR);
+            }
+            incomingLeaves.append(sa);
+            recordedLeaves.append(sb);
+            return;
+        }
+
+        if (a instanceof List<?> la && b instanceof List<?> lb) {
+            int maxLength = Math.max(la.size(), lb.size());
+            for (int i = 0; i < maxLength; i++) {
+                collectStringLeafPairs(i < la.size() ? la.get(i) : null, i < lb.size() ? lb.get(i) : null, depth + 1, incomingLeaves, recordedLeaves);
+            }
+            return;
+        }
+
+        if (a instanceof Map<?, ?> ma && b instanceof Map<?, ?> mb) {
+            Set<Object> keys = new LinkedHashSet<>();
+            keys.addAll(ma.keySet());
+            keys.addAll(mb.keySet());
+            for (Object key : keys) {
+                collectStringLeafPairs(ma.get(key), mb.get(key), depth + 1, incomingLeaves, recordedLeaves);
+            }
+        }
     }
 
     /**
@@ -304,13 +370,20 @@ public class Match {
         Map<String, Object> effectiveIncoming = incomingParams == null ? Map.of() : incomingParams;
         Map<String, Object> effectiveRecorded = recordedParams == null ? Map.of() : recordedParams;
 
-        if (hasMismatchedPathOrUriLeaf(effectiveIncoming, effectiveRecorded, 0)) {
+        if (hasHardMismatch(effectiveIncoming, effectiveRecorded, 0)) {
             return 0;
         }
 
         double structural = structuralSimilarity(effectiveIncoming, effectiveRecorded, 0);
-        double tokens = tokenJaccard(effectiveIncoming, effectiveRecorded);
-        double trigram = trigramDice(Json.MAPPER.valueToTree(effectiveIncoming).toString(), Json.MAPPER.valueToTree(effectiveRecorded).toString());
+
+        StringBuilder incomingLeaves = new StringBuilder();
+        StringBuilder recordedLeaves = new StringBuilder();
+        collectStringLeafPairs(effectiveIncoming, effectiveRecorded, 0, incomingLeaves, recordedLeaves);
+        // No string leaves at all (e.g. every argument is numeric) -- neutral, not penalizing:
+        // there's no prose signal to contradict what structuralSimilarity already scored.
+        boolean hasLeaves = incomingLeaves.length() > 0 || recordedLeaves.length() > 0;
+        double tokens = hasLeaves ? tokenJaccard(incomingLeaves.toString(), recordedLeaves.toString()) : 1;
+        double trigram = hasLeaves ? trigramDice(incomingLeaves.toString(), recordedLeaves.toString()) : 1;
 
         double score = WEIGHT_STRUCTURAL * structural + WEIGHT_TOKEN_JACCARD * tokens + WEIGHT_TRIGRAM_DICE * trigram;
         return Math.max(0, Math.min(1, score));

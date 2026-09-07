@@ -108,7 +108,7 @@ depends on `deja-core` transitively):
 ```kotlin
 // your project's build.gradle.kts
 dependencies {
-    testImplementation("io.github.sandipandutta21:deja-junit5:0.1.0")
+    testImplementation("io.github.sandipandutta21:deja-junit5:0.1.1")
 }
 ```
 
@@ -142,6 +142,28 @@ A cassette is a JSONL file: one header line, then one line per captured frame.
 It's a plain, versioned, language-agnostic format on purpose: [`conformance/`](conformance/)
 holds fixtures written by one implementation and read by the other, including a proof that both
 languages compute the *identical* redaction hash for the same secret.
+
+## Benchmark
+
+The matching tier ladder's actual claim — replay semantically-equivalent-but-different requests
+without introducing dangerous false matches — is backed by a hand-labeled corpus of 76 JSON-RPC
+(recorded, incoming) pairs, scored against three matchers: naive exact JSON equality, deja's
+structural tier alone, and deja's full pipeline.
+
+| Matcher | Precision | Recall | False-positive rate |
+|---|---:|---:|---:|
+| Exact (naive JSON equality) | 100.0% | 11.4% | 0.0% |
+| Structural only (deja tier 1/2) | 100.0% | 37.1% | 0.0% |
+| **Deja full pipeline** | **85.4%** | **100.0%** | **14.6%** |
+
+False-positive rate is the number that matters most: a wrong match means replaying the wrong
+tool's result, or worse, a mutating call with different arguments silently looking "already
+handled." The full report — including a by-category breakdown and, honestly, the two specific
+kinds of case the deterministic tier still can't safely catch (small-magnitude-but-consequential
+numeric drift, and opaque identifiers like UUIDs/emails/hashes that aren't path/URI-shaped) — is
+in [`ts/benchmarks/RESULTS.md`](ts/benchmarks/RESULTS.md). Every case and its rationale is in
+[`ts/benchmarks/corpus.mjs`](ts/benchmarks/corpus.mjs); regenerate with `npm run benchmark` from
+`ts/`.
 
 ## License
 

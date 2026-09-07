@@ -13,6 +13,19 @@ const JUDGE_BAND_WIDTH = 0.15;
 
 const MAX_RECURSION_DEPTH = 50;
 
+/** A numeric leaf pair is a hard mismatch -- forced REJECT ahead of the fuzzy scoring below,
+ *  regardless of how similar the rest of the payload is -- when the two values differ by more
+ *  than half of their magnitude (`numericCloseness` below this). A 10x change in a transfer
+ *  amount or a 100x change in an order quantity must never be blended away by an otherwise
+ *  identical payload; a paging `limit` off by one, or a retry count nudged up slightly, stays
+ *  in the fuzzy-scored band, since a generic structural matcher has no field-level semantics
+ *  to tell "amount" from "limit" -- only how far apart two numbers are. Found via benchmarking
+ *  (see ../../benchmarks): the original implementation blended a numeric leaf's low
+ *  numericCloseness in with token/trigram similarity computed over the *whole* stringified
+ *  params object, so an unrelated field matching exactly (the tool name, a shared key, an
+ *  unrelated argument) could "buy back" enough score to still clear the match threshold. */
+const NUMERIC_HARD_GATE_MIN_CLOSENESS = 0.5;
+
 /**
  * Fast-fails structural-tier matching across different tools: a recorded `fetch` call must
  * never satisfy an incoming `write_file` call just because both are `tools/call` envelopes.
@@ -167,35 +180,78 @@ function looksLikePathOrUri(value: string): boolean {
 }
 
 /**
- * Recursively walks two values in parallel looking for a pair of corresponding leaf strings
- * that are both path/URI-shaped and unequal. Used as a hard gate ahead of the fuzzy scoring
- * below: fuzzy-matching an identifier would risk confidently returning one resource's
- * content (or performing one resource's mutation) for a request naming a different one.
+ * Recursively walks two values in parallel looking for a leaf pair that must force a hard
+ * REJECT ahead of the fuzzy scoring below, however high its overall similarity would
+ * otherwise land: two unequal path/URI-shaped strings (fuzzy-matching an identifier would
+ * risk confidently returning one resource's content, or performing one resource's mutation,
+ * for a request naming a different one), or two numbers far enough apart to be a different
+ * real-world quantity (see {@link NUMERIC_HARD_GATE_MIN_CLOSENESS}).
  */
-function hasMismatchedPathOrUriLeaf(a: unknown, b: unknown, depth = 0): boolean {
+function hasHardMismatch(a: unknown, b: unknown, depth = 0): boolean {
     if (depth > MAX_RECURSION_DEPTH) return false;
 
     if (typeof a === "string" && typeof b === "string") {
         return a !== b && (looksLikePathOrUri(a) || looksLikePathOrUri(b));
     }
 
+    if (typeof a === "number" && typeof b === "number") {
+        return numericCloseness(a, b) < NUMERIC_HARD_GATE_MIN_CLOSENESS;
+    }
+
     if (Array.isArray(a) && Array.isArray(b)) {
         const maxLength = Math.max(a.length, b.length);
         for (let i = 0; i < maxLength; i++) {
-            if (hasMismatchedPathOrUriLeaf(a[i], b[i], depth + 1)) return true;
+            if (hasHardMismatch(a[i], b[i], depth + 1)) return true;
         }
         return false;
     }
 
     if (isPlainObject(a) && isPlainObject(b)) {
         for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-            if (hasMismatchedPathOrUriLeaf(a[key], b[key], depth + 1)) return true;
+            if (hasHardMismatch(a[key], b[key], depth + 1)) return true;
         }
         return false;
     }
 
     return false;
 }
+
+/** Collects every pair of corresponding leaf strings from two parallel-shaped values --
+ *  positionally, by the same array index or object key -- e.g. every prose/free-text argument
+ *  in a request's params. Numbers, booleans, and overall shape are already scored by
+ *  {@link structuralSimilarity}; folding them into a whole-object JSON.stringify for the
+ *  token/trigram channel too (the original implementation) let an exactly-matching sibling
+ *  field (a shared key name, the tool name itself) "buy back" enough score to paper over a
+ *  sibling argument that actually changed. Restricting that channel to just the string leaves
+ *  closes that gap without touching structuralSimilarity's own (already correct) per-leaf
+ *  handling of every other type. */
+function collectStringLeafPairs(a: unknown, b: unknown, depth: number, out: Array<[string, string]>): void {
+    if (depth > MAX_RECURSION_DEPTH) return;
+
+    if (typeof a === "string" && typeof b === "string") {
+        out.push([a, b]);
+        return;
+    }
+
+    if (Array.isArray(a) && Array.isArray(b)) {
+        const maxLength = Math.max(a.length, b.length);
+        for (let i = 0; i < maxLength; i++) {
+            collectStringLeafPairs(a[i], b[i], depth + 1, out);
+        }
+        return;
+    }
+
+    if (isPlainObject(a) && isPlainObject(b)) {
+        for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+            collectStringLeafPairs(a[key], b[key], depth + 1, out);
+        }
+    }
+}
+
+/** Joins collected leaf strings with a control character essentially never present in real
+ *  prose, so token/trigram comparison can't accidentally merge the tail of one leaf with the
+ *  head of the next into a token that never existed in either original value. */
+const LEAF_JOIN_SEPARATOR = "␟";
 
 /**
  * Tier 3: deterministic semantic similarity in [0, 1]. Combines structural shape, token
@@ -210,11 +266,18 @@ export function calculateSimilarity(incoming: JsonRpcMessage, recorded: JsonRpcM
     const incomingParams = normalizeMessage(incoming).params ?? {};
     const recordedParams = normalizeMessage(recorded).params ?? {};
 
-    if (hasMismatchedPathOrUriLeaf(incomingParams, recordedParams)) return 0;
+    if (hasHardMismatch(incomingParams, recordedParams)) return 0;
 
     const structural = structuralSimilarity(incomingParams, recordedParams);
-    const tokens = tokenJaccard(incomingParams, recordedParams);
-    const trigram = trigramDice(JSON.stringify(incomingParams), JSON.stringify(recordedParams));
+
+    const leafPairs: Array<[string, string]> = [];
+    collectStringLeafPairs(incomingParams, recordedParams, 0, leafPairs);
+    // No string leaves at all (e.g. every argument is numeric) -- neutral, not penalizing:
+    // there's no prose signal to contradict what structuralSimilarity already scored.
+    const joinedIncoming = leafPairs.map(([a]) => a).join(LEAF_JOIN_SEPARATOR);
+    const joinedRecorded = leafPairs.map(([, b]) => b).join(LEAF_JOIN_SEPARATOR);
+    const tokens = leafPairs.length === 0 ? 1 : tokenJaccard(joinedIncoming, joinedRecorded);
+    const trigram = leafPairs.length === 0 ? 1 : trigramDice(joinedIncoming, joinedRecorded);
 
     const score = WEIGHT_STRUCTURAL * structural + WEIGHT_TOKEN_JACCARD * tokens + WEIGHT_TRIGRAM_DICE * trigram;
     return Math.max(0, Math.min(1, score));

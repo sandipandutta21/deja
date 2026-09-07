@@ -40,6 +40,9 @@ Thumbs.db
 # Local installers -- never meant to be committed
 *.exe
 
+# Exported GPG private keys -- never meant to be committed, ever
+*.asc
+
 # Tool caches
 .eslintcache
 .cache/

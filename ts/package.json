@@ -27,6 +27,7 @@
     "watch": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "benchmark": "npm run build && node benchmarks/run.mjs",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
