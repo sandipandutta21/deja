@@ -81,6 +81,11 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_SIGNING_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.GPG_SIGNING_KEY_ID }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_SIGNING_KEY_PASSWORD }}
+          # The publish plugin's own wait-for-terminal-state poll (source:
+          # MavenCentralBuildService.kt) defaults to 900s, which our first real release
+          # exceeded despite actually succeeding on Central's side -- a freshly-verified
+          # namespace's first deployment seems to take longer than Central's usual case.
+          ORG_GRADLE_PROJECT_SONATYPE_CLOSE_TIMEOUT_SECONDS: "1800"
         # --no-configuration-cache: the publish plugin's credential/signing providers are read
         # at task-execution time from env vars set for this one job run -- not worth the risk
         # of a stale cached configuration papering over a rotated secret.
