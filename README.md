@@ -3,8 +3,8 @@
 **Record/replay for MCP that survives non-deterministic agent clients.**
 
 `deja` is a VCR for the [Model Context Protocol](https://modelcontextprotocol.io): it records a
-real MCP session (stdio or Streamable HTTP) to a plain JSONL cassette, then replays it later —
-offline, deterministic, in CI — even though the client replaying it will never send byte-for-byte
+real MCP session (stdio or Streamable HTTP) to a plain JSONL cassette, then replays it later
+(offline, deterministic, in CI) even though the client replaying it will never send byte-for-byte
 identical requests twice. That gap is closed by a tiered matcher (exact → structural →
 deterministic semantic similarity) instead of a naive request/response recording.
 
@@ -19,36 +19,36 @@ read and write byte-compatible files, and native test integrations for both ecos
 ## Why
 
 Record/replay testing tools assume a deterministic client: same request in, same request out,
-every time. An LLM-driven agent breaks that assumption — the same *intent* ("read this file")
+every time. An LLM-driven agent breaks that assumption: the same *intent* ("read this file")
 can arrive as structurally different JSON-RPC calls between runs. A naive VCR either matches too
 strictly (the recording rots the moment an agent phrases a call slightly differently) or too
 loosely (a fuzzy matcher risks confidently returning the wrong tool's content for a request that
-only looks similar). `deja`'s matching tier ladder — with hard safety gates against exactly that
-failure mode — is the part of this project that isn't "MCP nock."
+only looks similar). `deja`'s matching tier ladder, with hard safety gates against exactly that
+failure mode, is the part of this project that isn't "MCP nock."
 
 ## Highlights
 
-- **Recording** — transparent stdio proxy or Streamable HTTP proxy (SSE and pre-2025 batch
+- **Recording**: transparent stdio proxy or Streamable HTTP proxy (SSE and pre-2025 batch
   arrays included); captures the full wire, including server-initiated traffic (notifications,
   sampling, elicitation); secret redaction on by default (GitHub/`sk-`/Slack/AWS/JWT/Bearer/
   URL-embedded credentials → deterministic, hashed placeholders).
-- **Replay** — the cassette *is* the server, over stdio or HTTP; cross-transport (record over
+- **Replay**: the cassette *is* the server, over stdio or HTTP; cross-transport (record over
   HTTP, replay over stdio, or vice versa); a matcher failure answers a clean JSON-RPC error for
   that one request instead of poisoning the whole session.
-- **Matching, the differentiator** — exact → structural (key-order independent) → deterministic
+- **Matching, the differentiator**: exact → structural (key-order independent) → deterministic
   semantic (token Jaccard + trigram Dice + numeric closeness + recursive structural weighting) →
   optional bring-your-own LLM judge for the uncertain band only. Hard gates: `tools/call` never
   matches across different tool names, and path/URI-shaped parameters never fuzzy-match each
   other, however much of the string they share.
-- **Contract gating** — `deja verify` replays a cassette against a *live* server and diffs
+- **Contract gating**: `deja verify` replays a cassette against a *live* server and diffs
   responses field-by-field to catch drift; `deja diff` classifies breaking vs. minor changes
   between two cassettes (removed tools, newly-required params, result↔error flips, removed
   fields); `deja redact --scan` is a CI tripwire against committing an unredacted fixture.
-- **Native test integrations** — a zero-config `useCassette()` Vitest fixture on the TS side; a
+- **Native test integrations**: a zero-config `useCassette()` Vitest fixture on the TS side; a
   JUnit 5 `@Cassette` extension on the Java side that lets the official MCP Java SDK's
   `McpClient` run **unmodified** against a cassette, with `DEJA_MODE=record` re-recording the
   identical test code against a real server.
-- **Validated against real servers**, not just fixtures — both implementations are tested
+- **Validated against real servers**, not just fixtures: both implementations are tested
   directly against the official MCP reference servers (`server-everything`,
   `server-filesystem`), which is how several of the correctness fixes in this codebase were
   actually found.
@@ -57,9 +57,9 @@ failure mode — is the part of this project that isn't "MCP nock."
 
 ```
 deja/
-├── ts/            TypeScript implementation — CLI (deja record/replay/verify/diff/redact)
+├── ts/            TypeScript implementation: CLI (deja record/replay/verify/diff/redact)
 │                  + library + Vitest integration
-├── java/          Java implementation — deja-core (native engine) + deja-junit5
+├── java/          Java implementation: deja-core (native engine) + deja-junit5
 │                  (JUnit 5 @Cassette extension), a Gradle multi-module build
 ├── conformance/   Cassette fixtures shared by both test suites, proving the two
 │                  implementations read and write byte-compatible files
@@ -67,7 +67,7 @@ deja/
 └── README.md      you are here
 ```
 
-## Quick start — TypeScript
+## Quick start: TypeScript
 
 ```bash
 cd ts
@@ -99,7 +99,7 @@ test("lists tools", async () => {
 
 See [`ts/`](ts/) for the full CLI reference.
 
-## Quick start — Java
+## Quick start: Java
 
 Published on Maven Central as `io.github.sandipandutta21:deja-core` (the engine, zero test-framework
 dependency) and `io.github.sandipandutta21:deja-junit5` (adds the JUnit 5 `@Cassette` extension;
@@ -145,8 +145,8 @@ languages compute the *identical* redaction hash for the same secret.
 
 ## Benchmark
 
-The matching tier ladder's actual claim — replay semantically-equivalent-but-different requests
-without introducing dangerous false matches — is backed by a hand-labeled corpus of 76 JSON-RPC
+The matching tier ladder's actual claim (replay semantically-equivalent-but-different requests
+without introducing dangerous false matches) is backed by a hand-labeled corpus of 76 JSON-RPC
 (recorded, incoming) pairs, scored against three matchers: naive exact JSON equality, deja's
 structural tier alone, and deja's full pipeline.
 
@@ -158,13 +158,13 @@ structural tier alone, and deja's full pipeline.
 
 False-positive rate is the number that matters most: a wrong match means replaying the wrong
 tool's result, or worse, a mutating call with different arguments silently looking "already
-handled." The full report — including a by-category breakdown and, honestly, the two specific
+handled." The full report, including a by-category breakdown and, honestly, the two specific
 kinds of case the deterministic tier still can't safely catch (small-magnitude-but-consequential
-numeric drift, and opaque identifiers like UUIDs/emails/hashes that aren't path/URI-shaped) — is
+numeric drift, and opaque identifiers like UUIDs/emails/hashes that aren't path/URI-shaped), is
 in [`ts/benchmarks/RESULTS.md`](ts/benchmarks/RESULTS.md). Every case and its rationale is in
 [`ts/benchmarks/corpus.mjs`](ts/benchmarks/corpus.mjs); regenerate with `npm run benchmark` from
 `ts/`.
 
 ## License
 
-MIT © Sandipan Dutta — see [LICENSE](LICENSE).
+MIT © Sandipan Dutta. See [LICENSE](LICENSE).
