@@ -145,25 +145,36 @@ languages compute the *identical* redaction hash for the same secret.
 
 ## Benchmark
 
-The matching tier ladder's actual claim (replay semantically-equivalent-but-different requests
-without introducing dangerous false matches) is backed by a hand-labeled corpus of 76 JSON-RPC
-(recorded, incoming) pairs, scored against three matchers: naive exact JSON equality, deja's
-structural tier alone, and deja's full pipeline.
+The matching tier ladder's actual claim, replaying semantically-equivalent-but-different requests
+without introducing dangerous false matches, is backed by a generated (not hand-padded) corpus:
+realistic base interactions across six tool families, run through role-aware transforms that only
+fire where a suitable argument exists, each producing an explicit ground-truth label and rationale.
 
-| Matcher | Precision | Recall | False-positive rate |
-|---|---:|---:|---:|
-| Exact (naive JSON equality) | 100.0% | 11.4% | 0.0% |
-| Structural only (deja tier 1/2) | 100.0% | 37.1% | 0.0% |
-| **Deja full pipeline** | **85.4%** | **100.0%** | **14.6%** |
+```
+Replay Benchmark v1
+
+1,733 labeled MCP request variations
+
+                          Precision    Recall    False Positives
+Exact matching              100%        20.0%      0.0%
+Structural matching         100%        51.7%      0.0%
+Deja full pipeline          91.6%       98.8%      11.5%
+
+Tested across:
+✓ Official MCP filesystem server (real integration tests)
+✓ Official MCP everything server (real integration tests)
+✓ Controlled request variations (this corpus)
+✓ Dangerous near-misses (tool-name swaps, path/URI near-misses, numeric drift, opaque IDs)
+```
 
 False-positive rate is the number that matters most: a wrong match means replaying the wrong
 tool's result, or worse, a mutating call with different arguments silently looking "already
 handled." The full report, including a by-category breakdown and, honestly, the two specific
 kinds of case the deterministic tier still can't safely catch (small-magnitude-but-consequential
 numeric drift, and opaque identifiers like UUIDs/emails/hashes that aren't path/URI-shaped), is
-in [`ts/benchmarks/RESULTS.md`](ts/benchmarks/RESULTS.md). Every case and its rationale is in
-[`ts/benchmarks/corpus.mjs`](ts/benchmarks/corpus.mjs); regenerate with `npm run benchmark` from
-`ts/`.
+in [`ts/benchmarks/RESULTS.md`](ts/benchmarks/RESULTS.md). The corpus generator, every transform,
+and the rationale behind each category is in [`ts/benchmarks/corpus.mjs`](ts/benchmarks/corpus.mjs);
+regenerate with `npm run benchmark` from `ts/`.
 
 ## License
 
