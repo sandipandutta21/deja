@@ -110,7 +110,7 @@ cd java
 ```kotlin
 // your project's build.gradle.kts
 dependencies {
-    testImplementation("dev.deja:deja-junit5:0.1.0")
+    testImplementation("io.github.sandipandutta21:deja-junit5:0.1.0")
 }
 ```
 
