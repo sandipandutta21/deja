@@ -14,6 +14,7 @@ read and write byte-compatible files, and native test integrations for both ecos
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 ![Java](https://img.shields.io/badge/java-17%2B-orange)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.sandipandutta21/deja-core)](https://central.sonatype.com/artifact/io.github.sandipandutta21/deja-core)
 
 ## Why
 
@@ -100,12 +101,9 @@ See [`ts/`](ts/) for the full CLI reference.
 
 ## Quick start — Java
 
-Not yet published to Maven Central — build and consume locally:
-
-```bash
-cd java
-./gradlew publishToMavenLocal
-```
+Published on Maven Central as `io.github.sandipandutta21:deja-core` (the engine, zero test-framework
+dependency) and `io.github.sandipandutta21:deja-junit5` (adds the JUnit 5 `@Cassette` extension;
+depends on `deja-core` transitively):
 
 ```kotlin
 // your project's build.gradle.kts
